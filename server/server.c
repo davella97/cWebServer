@@ -1,13 +1,41 @@
+#include <fcntl.h>
+#include <magic.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #define PORT 8080
 #define MAX_REQUEST_SIZE 8192
+
+char *getMime(char *filePath) {
+  const char *mime;
+  magic_t magic;
+
+  magic = magic_open(MAGIC_MIME_TYPE);
+  magic_load(magic, NULL);
+  magic_compile(magic, NULL);
+  mime = magic_file(magic, filePath);
+
+  magic_close(magic);
+
+  return mime;
+}
+
+char *getFileExt(char *fileName) {
+  char *ext = strrchr(fileName, '.');
+
+  if (!ext) {
+    return "";
+  } else {
+    return ext + 1;
+  }
+}
 
 short int read_line(char *buffer, int client) {
   int pos = 0;
@@ -31,6 +59,46 @@ short int read_line(char *buffer, int client) {
   return len;
 }
 
+void createGETResponse(char *fileName, int client) {
+  char *filePath = malloc(strlen(fileName) + strlen("file/") + 1);
+  sprintf(filePath, "file%s", fileName);
+
+  int fileFd = open(filePath, O_RDONLY);
+  if (fileFd == -1) {
+    char negativeResponse[512];
+    snprintf(negativeResponse, sizeof(negativeResponse),
+             "HTTP/1.1 404 Not Found\r\n"
+             "Content-Type: text/plain\r\n"
+             "\r\n"
+             "404 Not Found");
+    send(client, negativeResponse, strlen(negativeResponse), 0);
+    free(filePath);
+    return;
+  }
+
+  const char *mime = getMime(filePath);
+  FILE *f = fopen(filePath, "rb");
+  fseek(f, 0, SEEK_END);
+  long fileSize = ftell(f);
+  fseek(f, 0, SEEK_SET);
+
+  char header[512];
+  snprintf(header, 512,
+           "HTTP/1.1 200 OK \r\n"
+           "Content-Type: %s\r\n"
+           "Content-Length: %ld\r\n"
+           "\r\n",
+           mime, fileSize);
+
+  write(client, header, strlen(header));
+
+  char buf[2048];
+  size_t n;
+  while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+    write(client, buf, n);
+  }
+}
+
 void *connectionHandler(void *arg) {
   int client = *((int *)arg);
   char method[8];
@@ -38,6 +106,7 @@ void *connectionHandler(void *arg) {
   char version[12];
   char buffer[MAX_REQUEST_SIZE] = {0};
 
+  char fileExt[32];
   short int buffLen = read_line(buffer, client);
   printf("%s\n", buffer);
   buffer[buffLen] = '\0';
@@ -45,8 +114,9 @@ void *connectionHandler(void *arg) {
   if (sscanf(buffer, "%7s %1023s %11s", method, path, version) == 3) {
     fprintf(stderr, "Method : %s\nPath : %s\nVersion :%s", method, path,
             version);
-    if (strcmp(method, "GET") != 0) {
-      //...
+
+    if (strcmp(method, "GET") == 0) {
+      createGETResponse(path, client);
     } else {
       printf("Unsupported request");
     }
