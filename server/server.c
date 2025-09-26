@@ -13,6 +13,34 @@
 #define PORT 8080
 #define MAX_REQUEST_SIZE 8192
 
+const char *getMime2(const char *fileName) {
+  const char *ext = strrchr(fileName, '.');
+  if (!ext)
+    return "application/octet-stream";
+
+  if (strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0)
+    return "text/html";
+  if (strcmp(ext, ".css") == 0)
+    return "text/css";
+  if (strcmp(ext, ".js") == 0)
+    return "application/javascript";
+  if (strcmp(ext, ".png") == 0)
+    return "image/png";
+  if (strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0)
+    return "image/jpeg";
+  if (strcmp(ext, ".gif") == 0)
+    return "image/gif";
+  if (strcmp(ext, ".svg") == 0)
+    return "image/svg+xml";
+  if (strcmp(ext, ".txt") == 0)
+    return "text/plain";
+  if (strcmp(ext, ".ico") == 0)
+    return "image/x-icon";
+
+  // fallback for unknown extensions
+  return "application/octet-stream";
+}
+
 char *getMime(char *filePath) {
   const char *mime;
   magic_t magic;
@@ -25,16 +53,6 @@ char *getMime(char *filePath) {
   magic_close(magic);
 
   return mime;
-}
-
-char *getFileExt(char *fileName) {
-  char *ext = strrchr(fileName, '.');
-
-  if (!ext) {
-    return "";
-  } else {
-    return ext + 1;
-  }
 }
 
 short int read_line(char *buffer, int client) {
@@ -76,7 +94,7 @@ void createGETResponse(char *fileName, int client) {
     return;
   }
 
-  const char *mime = getMime(filePath);
+  const char *mime = getMime2(filePath);
   FILE *f = fopen(filePath, "rb");
   fseek(f, 0, SEEK_END);
   long fileSize = ftell(f);
@@ -90,6 +108,8 @@ void createGETResponse(char *fileName, int client) {
            "\r\n",
            mime, fileSize);
 
+  printf("\n%s\n", fileName);
+  fprintf(stderr, header);
   write(client, header, strlen(header));
 
   char buf[2048];
@@ -106,22 +126,23 @@ void *connectionHandler(void *arg) {
   char version[12];
   char buffer[MAX_REQUEST_SIZE] = {0};
 
-  char fileExt[32];
-  short int buffLen = read_line(buffer, client);
-  printf("%s\n", buffer);
-  buffer[buffLen] = '\0';
+  while (1) {
+    short int buffLen = read_line(buffer, client);
+    printf("%s\n", buffer);
+    buffer[buffLen] = '\0';
 
-  if (sscanf(buffer, "%7s %1023s %11s", method, path, version) == 3) {
-    fprintf(stderr, "Method : %s\nPath : %s\nVersion :%s", method, path,
-            version);
+    if (sscanf(buffer, "%7s %1023s %11s", method, path, version) == 3) {
+      fprintf(stderr, "Method : %s\nPath : %s\nVersion :%s", method, path,
+              version);
 
-    if (strcmp(method, "GET") == 0) {
-      createGETResponse(path, client);
+      if (strcmp(method, "GET") == 0) {
+        createGETResponse(path, client);
+      } else {
+        printf("Unsupported request");
+      }
     } else {
-      printf("Unsupported request");
+      printf("400 Bad Request");
     }
-  } else {
-    printf("400 Bad Request");
   }
 }
 
